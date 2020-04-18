@@ -100,11 +100,11 @@ class SequencePair():
         
         
     def log_q_x( self, i ):
-        if i >= self.n:
+        if i > self.n:
             return np.NINF
         return self.model.log_q( self.sequence_item_X(i) )
     def log_q_y( self, j ):
-        if j >= self.m:
+        if j > self.m:
             return np.NINF
     
         return self.model.log_q( self.sequence_item_Y(j) )
@@ -115,7 +115,7 @@ class SequencePair():
         return self.sequenceY[ j-1 ]
     
     def log_p( self, i, j ):
-        if i >= self.n or j >= self.m:
+        if i > self.n or j > self.m:
             return np.NINF
     
         return self.model.log_p( self.sequence_item_X(i), self.sequence_item_Y(j) )
@@ -132,31 +132,32 @@ class SequencePair():
         if self.log_f_E:
             return self.log_f_E
             
-        log_f_A = np.zeros( (self.n+1, self.m+1), dtype=np.float32 )
-        log_f_I = np.zeros( (self.n+1, self.m+1), dtype=np.float32 )        
-        log_f_D = np.zeros( (self.n+1, self.m+1), dtype=np.float32 )
+        log_f_A = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )
+        log_f_I = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )        
+        log_f_D = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )
         
         ####################################
         # Initial values at start boundaries
         ####################################
-        # f_A( 0,0 ) has a probability of 1 so the log is 0.0 which is already initialized
-        log_f_A[1:,0] = log_f_A[0,1:] = np.NINF
-        
-        # Start boundaries for insertion and deletion states
-        log_f_I[0,0] = log_f_D[0,0] = np.NINF
-        for i in range( self.n ):
-            log_f_I[i+1,0] = self.log_q_x( i+1 ) + self.model.log_transition_I_I + log_f_I[i,0]
-            log_f_I[i+1,0] = i
-        for j in range( self.m ):
-            log_f_D[0,j+1] = self.log_q_y( j+1 ) + self.model.log_transition_D_D + log_f_D[0,j]
-            
+        # f_A( 0,0 ) has a probability of 1 so the log is 0.0
+        log_f_A[0,0] = 0.0
+        # Everything else is already initialized to a probability of zero
+
+        # Initialize start boundary for Insertion state        
+        log_f_I[1,0] = self.model.log_transition_A_I + self.log_q_x( 1 )
+        for i in range( 2, self.n+1 ):
+            log_f_I[i,0] = self.log_q_x( i ) + self.model.log_transition_I_I + log_f_I[i-1,0]
+
+        # Initialize start boundary for Deletion state        
+        log_f_D[0,1] = self.model.log_transition_A_D + self.log_q_y( 1 )
+        for j in range( 2, self.m+1 ):
+            log_f_D[0,j] = self.log_q_y( j ) + self.model.log_transition_D_D + log_f_D[0,j-1]
         
         ####################################
         # Recursion
         ####################################
         for i in range( 1, self.n+1 ):
             for j in range( 1, self.m+1 ):
-
                 ### Probability ends in Alignment
                 log_f_A[i,j] = self.log_p( i, j ) + logsumexp( [
                     self.model.log_transition_A_A + log_f_A[i-1,j-1],

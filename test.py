@@ -5,8 +5,13 @@ Model( 0.5, 0.3, 0.5, 0.1, 4 )
 
 bw = BaumWelch( 0.5, 0.3, 0.5, 0.1, 4 )
 
-x = "ACGTCC"
-y = "AAGG"
+
+x = "ACGG"
+y = "ACGG"
+
+x = "ATCC"
+y = "ATCC"
+
 
 model = bw.build_model()
 
