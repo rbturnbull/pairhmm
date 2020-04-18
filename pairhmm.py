@@ -63,10 +63,13 @@ class Model():
         self.current_expected_matches = 0.0
         self.current_expected_mismatches = 0.0
         
-        for sequenceX,sequenceY in data:
+        for index, (sequenceX,sequenceY) in enumerate(data):
             pair = SequencePair( self, sequenceX, sequenceY )
             log_probability_sequence = pair.forward_algorithm()
             pair.backward_algorithm()
+            
+            if index % 10 == 0:
+                print("Seq %d" % index)
             
             self.current_log_likelihood += log_probability_sequence
             
@@ -155,15 +158,17 @@ class SequencePair():
         log_f_A[0,0] = 0.0
         # Everything else is already initialized to a probability of zero
 
-        # Initialize start boundary for Insertion state        
-        log_f_I[1,0] = self.model.log_transition_A_I + self.log_q_x( 1 )
-        for i in range( 2, self.n+1 ):
-            log_f_I[i,0] = self.log_q_x( i ) + self.model.log_transition_I_I + log_f_I[i-1,0]
+        # Initialize start boundary for Insertion state     
+        if self.n > 0:   
+            log_f_I[1,0] = self.model.log_transition_A_I + self.log_q_x( 1 )
+            for i in range( 2, self.n+1 ):
+                log_f_I[i,0] = self.log_q_x( i ) + self.model.log_transition_I_I + log_f_I[i-1,0]
 
-        # Initialize start boundary for Deletion state        
-        log_f_D[0,1] = self.model.log_transition_A_D + self.log_q_y( 1 )
-        for j in range( 2, self.m+1 ):
-            log_f_D[0,j] = self.log_q_y( j ) + self.model.log_transition_D_D + log_f_D[0,j-1]
+        # Initialize start boundary for Deletion state  
+        if self.m > 0:                 
+            log_f_D[0,1] = self.model.log_transition_A_D + self.log_q_y( 1 )
+            for j in range( 2, self.m+1 ):
+                log_f_D[0,j] = self.log_q_y( j ) + self.model.log_transition_D_D + log_f_D[0,j-1]
         
         ####################################
         # Recursion
@@ -287,6 +292,7 @@ class BaumWelch():
         
     def iterate( self, data, steps = 10, delta = None ):
         prev_log_liklihood = np.NINF
+        print( "Starting Baum-Welch on %d samples." % len(data) )
         for step in range(steps):
             model = self.build_model()
             
