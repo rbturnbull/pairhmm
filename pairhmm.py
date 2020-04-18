@@ -32,7 +32,7 @@ class Model():
         estimated_p_gap_extend = 0.5*(self.current_expected_I_I + self.current_expected_D_D)/(
             self.current_expected_I_I + self.current_expected_D_D + self.current_expected_I_A + self.current_expected_D_A)
         
-        raise estimated_p_mismatch, estimated_p_gap_start, estimated_p_gap_extend
+        return estimated_p_mismatch, estimated_p_gap_start, estimated_p_gap_extend
 
     def expected_values( self, data ):    
         self.current_data = data
@@ -73,7 +73,7 @@ class Model():
 
                     # Emission Expectations
                     posterior_state_A = np.exp( pair.log_f_A[i,j] + pair.log_b_A[i,j] - log_probability_sequence )
-                    if self.sequence_item_X(i) == self.sequence_item_Y(j)
+                    if self.sequence_item_X(i) == self.sequence_item_Y(j):
                         self.current_expected_matches += posterior_state_A
                     else:
                         self.current_expected_mismatches += posterior_state_A
