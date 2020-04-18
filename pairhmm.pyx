@@ -138,8 +138,8 @@ cdef class Model():
             log_probability_sequence = pair.forward_algorithm()
             pair.backward_algorithm()
                         
-            #if index % 10 == 0:
-            #    print("Seq %d" % index)
+            if index % 10 == 0:
+                print("Seq %d" % index)
             
             self.current_log_likelihood += log_probability_sequence
             
@@ -258,29 +258,39 @@ cdef class SequencePair():
                       
         cdef int i, j
                     
-        cpdef np.ndarray log_f_A = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )
-        cpdef np.ndarray log_f_I = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )        
-        cpdef np.ndarray log_f_D = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )
+        cpdef np.ndarray log_f_A = np.empty( (self.n+1, self.m+1), dtype=np.float32 )
+        cpdef np.ndarray log_f_I = np.empty( (self.n+1, self.m+1), dtype=np.float32 )        
+        cpdef np.ndarray log_f_D = np.empty( (self.n+1, self.m+1), dtype=np.float32 )
         
         ####################################
         # Initial values at start boundaries
         ####################################
         # f_A( 0,0 ) has a probability of 1 so the log is 0.0
         log_f_A[0,0] = 0.0
-        # Everything else is already initialized to a probability of zero
+        log_f_I[0,0] = np.NINF
+        log_f_D[0,0] = np.NINF
 
-        # Initialize start boundary for Insertion state     
-        if self.n > 0:   
+        # Initialize j == 0 boundary     
+        if self.n > 0:  
+            log_f_A[1,0] = np.NINF         
             log_f_I[1,0] = self.model.log_transition_A_I + self.log_q_x( 1 )
+            log_f_D[1,0] = np.NINF
+            
             for i in range( 2, self.n+1 ):
+                log_f_A[i,0] = np.NINF            
                 log_f_I[i,0] = self.log_q_x( i ) + self.model.log_transition_I_I + log_f_I[i-1,0]
+                log_f_D[i,0] = np.NINF
 
-        # Initialize start boundary for Deletion state  
-        if self.m > 0:                 
+        # Initialize i == 0 boundary  
+        if self.m > 0:              
+            log_f_A[0,1] = np.NINF               
+            log_f_I[0,1] = np.NINF               
             log_f_D[0,1] = self.model.log_transition_A_D + self.log_q_y( 1 )
             for j in range( 2, self.m+1 ):
+                log_f_A[0,j] = np.NINF
+                log_f_I[0,j] = np.NINF
                 log_f_D[0,j] = self.log_q_y( j ) + self.model.log_transition_D_D + log_f_D[0,j-1]
-        
+                
         ####################################
         # Recursion
         ####################################
@@ -331,9 +341,13 @@ cdef class SequencePair():
             return
         cdef int i, j        
         
-        cpdef np.ndarray log_b_A = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 ) # We don't calculate the 0 rows so this could be optimized but it is written like this for the sake of clarity
-        cpdef np.ndarray log_b_I = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )        
-        cpdef np.ndarray log_b_D = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )
+        cpdef np.ndarray log_b_A = np.empty( (self.n+1, self.m+1), dtype=np.float32 ) # We don't calculate the 0 rows so this could be optimized but it is written like this for the sake of clarity
+        cpdef np.ndarray log_b_I = np.empty( (self.n+1, self.m+1), dtype=np.float32 )        
+        cpdef np.ndarray log_b_D = np.empty( (self.n+1, self.m+1), dtype=np.float32 )
+        
+        cdef float A_end
+        cdef float I_end
+        cdef float D_end
                 
         ####################################
         # Initial values at start boundaries
@@ -346,10 +360,12 @@ cdef class SequencePair():
             j = self.m
             log_b_A[i,j] = self.model.log_transition_A_I + self.log_q_x(i+1) + log_b_I[i+1,j]            
             log_b_I[i,j] = self.model.log_transition_I_I + self.log_q_x(i+1) + log_b_I[i+1,j]
+            log_b_D[i,j] = np.NINF
             
         for j in range( self.m-1, 0, -1 ):
             i = self.n       
             log_b_A[i,j] = self.model.log_transition_A_D + self.log_q_y(j+1) + log_b_D[i,j+1]
+            log_b_I[i,j] = np.NINF
             log_b_D[i,j] = self.model.log_transition_D_D + self.log_q_y(j+1) + log_b_D[i,j+1]
 
         ####################################
@@ -357,23 +373,27 @@ cdef class SequencePair():
         ####################################                    
         for i in range( self.n-1, 0, -1 ):
             for j in range( self.m-1, 0, -1 ):
+                A_end = self.log_p(i+1,j+1) + log_b_A[i+1,j+1]
+                I_end = self.log_q_x(i+1)   + log_b_I[i+1,j]
+                D_end = self.log_q_y(j+1)   + log_b_D[i,j+1]
+            
                 ### Probability of latter alignment if in state A at (i,j)
                 log_b_A[i,j] = logsumexp_3(
-                    self.model.log_transition_A_A + self.log_p(i+1,j+1) + log_b_A[i+1,j+1],
-                    self.model.log_transition_A_I + self.log_q_x(i+1)   + log_b_I[i+1,j],
-                    self.model.log_transition_A_D + self.log_q_y(j+1)   + log_b_D[i,j+1],
+                    self.model.log_transition_A_A + A_end,
+                    self.model.log_transition_A_I + I_end,
+                    self.model.log_transition_A_D + D_end,
                     )
 
                 ### Probability of latter alignment if in state I (Insertion) at (i,j)
                 log_b_I[i,j] = logsumexp_2(
-                    self.model.log_transition_I_A + self.log_p(i+1,j+1) + log_b_A[i+1,j+1],
-                    self.model.log_transition_I_I + self.log_q_x(i+1)   + log_b_I[i+1,j],
+                    self.model.log_transition_I_A + A_end,
+                    self.model.log_transition_I_I + I_end,
                     )
 
                 ### Probability of latter alignment if in state D at (i,j)
                 log_b_D[i,j] = logsumexp_2(
-                    self.model.log_transition_D_A + self.log_p(i+1,j+1) + log_b_A[i+1,j+1],
-                    self.model.log_transition_D_D + self.log_q_y(j+1)   + log_b_D[i,j+1],
+                    self.model.log_transition_D_A + A_end,
+                    self.model.log_transition_D_D + D_end,
                     )
         
         self.log_b_A = log_b_A        
