@@ -30,3 +30,14 @@ print(pair.log_f_I)
 
 print("log f_D")
 print(pair.log_f_D)
+
+pair.backward_algorithm()
+
+print("log b_A")
+print(pair.log_b_A)
+
+print("log b_I")
+print(pair.log_b_I)
+
+print("log b_D")
+print(pair.log_b_D)

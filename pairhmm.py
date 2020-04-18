@@ -202,28 +202,33 @@ class SequencePair():
         if self.log_b_A and self.log_b_D and self.log_b_D:
             return
         
-        log_b_A = np.zeros( (self.n+2, self.m+2), dtype=np.float32 )        # The size is n+2,m+2 to make the recursion simpler, this should be optimized
-        log_b_I = np.zeros( (self.n+2, self.m+2), dtype=np.float32 )        # The size is n+2,m+2 to make the recursion simpler, this should be optimized       
-        log_b_D = np.zeros( (self.n+2, self.m+2), dtype=np.float32 )        # The size is n+2,m+2 to make the recursion simpler, this should be optimized
         
+        log_b_A = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 ) # We don't calculate the 0 rows so this could be optimized but it is written like this for the sake of clarity
+        log_b_I = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )        
+        log_b_D = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )
+                
         ####################################
         # Initial values at start boundaries
         ####################################        
-        log_b_A[self.n,:self.m] = np.NINF
-        log_b_A[:self.n,self.m] = np.NINF        
-                
-        # Start boundaries for insertion and deletion states
-        log_b_A[self.n+1,:] = log_b_A[:,self.m+1] = np.NINF
-        log_b_I[self.n+1,:] = log_b_I[:,self.m+1] = np.NINF
-        log_b_I[self.n+1,:] = log_b_I[:,self.m+1] = np.NINF
-
         log_b_A[self.n, self.m] = self.model.log_transition_A_E
         log_b_I[self.n, self.m] = self.model.log_transition_I_E
         log_b_D[self.n, self.m] = self.model.log_transition_D_E
         
-        
-        for i in range( 1, self.n+1, -1 ):
-            for j in range( 1, self.m+1, -1 ):
+        for i in range( self.n-1, 0, -1 ):
+            j = self.m
+            log_b_A[i,j] = self.model.log_transition_A_I + self.log_q_x(i+1) + log_b_I[i+1,j]            
+            log_b_I[i,j] = self.model.log_transition_I_I + self.log_q_x(i+1) + log_b_I[i+1,j]
+            
+        for j in range( self.m-1, 0, -1 ):
+            i = self.n       
+            log_b_A[i,j] = self.model.log_transition_A_D + self.log_q_y(j+1) + log_b_D[i,j+1]
+            log_b_D[i,j] = self.model.log_transition_D_D + self.log_q_y(j+1) + log_b_D[i,j+1]
+
+        ####################################
+        # Recursion
+        ####################################                    
+        for i in range( self.n-1, 0, -1 ):
+            for j in range( self.m-1, 0, -1 ):
                 ### Probability of latter alignment if in state A at (i,j)
                 log_b_A[i,j] = logsumexp( [
                     self.model.log_transition_A_A + self.log_p(i+1,j+1) + log_b_A[i+1,j+1],
