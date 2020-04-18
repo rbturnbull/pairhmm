@@ -24,13 +24,25 @@ class Model():
 
 
         
-    def estimate_parameters( self, data ):
+    def estimate_parameters( self, data, pseudocount_match, pseudocount_mismatch, pseudocount_align, pseudocount_gap_start, pseudocount_gap_end, pseudocount_gap_extend ):
         self.expected_values(data)
         
-        estimated_p_match = expected_matches/(expected_matches + expected_mismatches)
-        estimated_p_gap_start = 0.5*(self.current_expected_A_I+self.current_expected_A_D)/(self.current_expected_A_A+current_expected_A_I+self.current_expected_A_D)
-        estimated_p_gap_extend = 0.5*(self.current_expected_I_I + self.current_expected_D_D)/(
-            self.current_expected_I_I + self.current_expected_D_D + self.current_expected_I_A + self.current_expected_D_A)
+        matches = self.current_expected_matches + pseudocount_match
+        mismatches = self.current_expected_mismatches + pseudocount_mismatch
+        
+        A_A = self.current_expected_A_A + pseudocount_align
+        A_I = self.current_expected_A_I + pseudocount_gap_start
+        A_D = self.current_expected_A_D + pseudocount_gap_start    
+        
+        D_A = self.current_expected_D_A + pseudocount_gap_end
+        D_D = self.current_expected_D_D + pseudocount_gap_extend
+
+        I_A = self.current_expected_I_A + pseudocount_gap_end
+        I_I = self.current_expected_I_I + pseudocount_gap_extend        
+        
+        estimated_p_match = matches/(matches + mismatches)
+        estimated_p_gap_start = 0.5 * (A_I + A_D)/(A_A + A_I + A_D)
+        estimated_p_gap_extend = 0.5 * (I_I + D_D)/(I_I + D_D + I_A + D_A)
         
         return estimated_p_match, estimated_p_gap_start, estimated_p_gap_extend
 
@@ -58,22 +70,22 @@ class Model():
             
             self.current_log_likelihood += log_probability_sequence
             
-            for i in range( 1, self.n+1 ):
-                for j in range( 1, self.m+1 ):
+            for i in range( 1, pair.n ):
+                for j in range( 1, pair.m ):
                     # Transition Expectations
-                    self.current_expected_A_A += np.exp( pair.log_f_A[i,j] + self.log_transition_A_A + pair.log_p(i+1,j+1) + pair.b_A[i+1,j+1] - log_probability_sequence )
-                    self.current_expected_A_I += np.exp( pair.log_f_A[i,j] + self.log_transition_A_I + pair.log_q_x( i+1 ) + pair.b_I[i+1,j]   - log_probability_sequence )
-                    self.current_expected_A_D += np.exp( pair.log_f_A[i,j] + self.log_transition_A_D + pair.log_q_y( j+1 ) + pair.b_D[i,j+1]   - log_probability_sequence )
+                    self.current_expected_A_A += np.exp( pair.log_f_A[i,j] + self.log_transition_A_A + pair.log_p(i+1,j+1) + pair.log_b_A[i+1,j+1] - log_probability_sequence )
+                    self.current_expected_A_I += np.exp( pair.log_f_A[i,j] + self.log_transition_A_I + pair.log_q_x( i+1 ) + pair.log_b_I[i+1,j]   - log_probability_sequence )
+                    self.current_expected_A_D += np.exp( pair.log_f_A[i,j] + self.log_transition_A_D + pair.log_q_y( j+1 ) + pair.log_b_D[i,j+1]   - log_probability_sequence )
         
-                    self.current_expected_I_A += np.exp( pair.log_f_I[i,j] + self.log_transition_I_A + pair.log_p(i+1,j+1) + pair.b_A[i+1,j+1] - log_probability_sequence )     
-                    self.current_expected_I_I += np.exp( pair.log_f_I[i,j] + self.log_transition_I_I + pair.log_q_x( i+1 ) + pair.b_I[i+1,j]   - log_probability_sequence )     
+                    self.current_expected_I_A += np.exp( pair.log_f_I[i,j] + self.log_transition_I_A + pair.log_p(i+1,j+1) + pair.log_b_A[i+1,j+1] - log_probability_sequence )     
+                    self.current_expected_I_I += np.exp( pair.log_f_I[i,j] + self.log_transition_I_I + pair.log_q_x( i+1 ) + pair.log_b_I[i+1,j]   - log_probability_sequence )     
 
-                    self.current_expected_D_A += np.exp( pair.log_f_D[i,j] + self.log_transition_D_A + pair.log_p(i+1,j+1) + pair.b_A[i+1,j+1] - log_probability_sequence )        
-                    self.current_expected_D_D += np.exp( pair.log_f_D[i,j] + self.log_transition_D_D + pair.log_q_y( j+1 ) + pair.b_D[i+1,j]   - log_probability_sequence )
+                    self.current_expected_D_A += np.exp( pair.log_f_D[i,j] + self.log_transition_D_A + pair.log_p(i+1,j+1) + pair.log_b_A[i+1,j+1] - log_probability_sequence )        
+                    self.current_expected_D_D += np.exp( pair.log_f_D[i,j] + self.log_transition_D_D + pair.log_q_y( j+1 ) + pair.log_b_D[i+1,j]   - log_probability_sequence )
 
                     # Emission Expectations
                     posterior_state_A = np.exp( pair.log_f_A[i,j] + pair.log_b_A[i,j] - log_probability_sequence )
-                    if self.sequence_item_X(i) == self.sequence_item_Y(j):
+                    if pair.sequence_item_X(i) == pair.sequence_item_Y(j):
                         self.current_expected_matches += posterior_state_A
                     else:
                         self.current_expected_mismatches += posterior_state_A
@@ -254,22 +266,33 @@ class SequencePair():
         
         
 class BaumWelch():
-    def __init__(self, initial_p_match, initial_p_gap_start, initial_p_gap_extend, p_end, alphabet_size):
+    def __init__(self, initial_p_match, initial_p_gap_start, initial_p_gap_extend, p_end, alphabet_size, pseudocount_match = 0.0, pseudocount_mismatch = 0.0, pseudocount_align = 0.0, pseudocount_gap_start = 0.0, pseudocount_gap_end = 0.0, pseudocount_gap_extend = 0.0):
         self.current_p_match = initial_p_match
         self.current_p_gap_start = initial_p_gap_start
         self.current_p_gap_extend = initial_p_gap_extend
         self.p_end = p_end
         self.alphabet_size = alphabet_size
         
+        self.pseudocount_match = pseudocount_match
+        self.pseudocount_mismatch = pseudocount_mismatch
+        self.pseudocount_align = pseudocount_align        
+        self.pseudocount_gap_start = pseudocount_gap_start
+        self.pseudocount_gap_end = pseudocount_gap_end
+        self.pseudocount_gap_extend = pseudocount_gap_extend
+        
+        
+        
     def build_model(self):
         return Model( self.current_p_match, self.current_p_gap_start, self.current_p_gap_extend, self.p_end, self.alphabet_size )
         
     def iterate( self, data, steps = 10, delta = None ):
         prev_log_liklihood = np.NINF
-        for step in steps:
+        for step in range(steps):
             model = self.build_model()
             
-            log_likelihood, self.current_p_match, self.current_p_gap_start, self.current_p_gap_extend = model.estimate_parameters( data )
+            self.current_p_match, self.current_p_gap_start, self.current_p_gap_extend = model.estimate_parameters( data, self.pseudocount_match, self.pseudocount_mismatch, self.pseudocount_align, self.pseudocount_gap_start, self.pseudocount_gap_end, self.pseudocount_gap_extend )
+            log_likelihood = model.current_log_likelihood
+            print("Baum-Welch Interation:", step, log_likelihood, self.current_p_match, self.current_p_gap_start, self.current_p_gap_extend )
             
             if delta and abs( log_likelihood - prev_log_liklihood ) < delta:
                 return model

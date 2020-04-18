@@ -2,8 +2,9 @@ from pairhmm import *
 
 Model( 0.5, 0.3, 0.5, 0.1, 4 )
 
+pseudocounts = [1]*6
 
-bw = BaumWelch( 0.5, 0.3, 0.5, 0.1, 4 )
+bw = BaumWelch( 0.5, 0.3, 0.5, 0.1, 4, *pseudocounts )
 
 
 x = "ACGG"
@@ -41,3 +42,9 @@ print(pair.log_b_I)
 
 print("log b_D")
 print(pair.log_b_D)
+
+data = [[x,y]]
+param = model.estimate_parameters( data, *pseudocounts )
+print(param)
+
+bw.iterate(data)
