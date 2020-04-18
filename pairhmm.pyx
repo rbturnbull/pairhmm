@@ -1,10 +1,78 @@
 import numpy as np
+np.get_include()
+
+cimport numpy as np
+
+#from sselogsumexp import logsumexp
 from scipy.special import logsumexp
 
-class Model():
-    def __init__(self, p_match, p_gap_start, p_gap_extend, p_end, alphabet_size):
-        self.constant_log_q = np.log( 1.0/alphabet_size )
+cdef (float) logsumexp_2( float a, float b ):
+#    return logsumexp( np.asarray( [a,b], dtype=np.float32 ) )
+#    return logsumexp( [a,b] )
+    if a == np.NINF:
+        return b
+    if b == np.NINF:
+        return a
+
+    cdef float mymax = max(a, b)
+    return mymax + np.log(np.exp(a - mymax) + np.exp(b - mymax))
+
+cdef (float) logsumexp_3( float a, float b, float c ):
+#    return logsumexp( np.asarray( [a,b,c], dtype=np.float32 ) )
+    if a == np.NINF:
+        return logsumexp_2(b, c)
+    if b == np.NINF:
+        return logsumexp_2(a, c)
+    if c == np.NINF:
+        return logsumexp_2(a, b)
+        
+#    return logsumexp( [a,b,c] )
+    cdef float mymax = max(a, b, c)
+    return mymax + np.log(np.exp(a - mymax) + np.exp(b - mymax) + np.exp(c - mymax))
+
+
+cdef class Model():
+    cpdef int alphabet_size
+    
+    cpdef float constant_log_q
+    cpdef float log_p_match
+    cpdef float log_p_mismatch
+    
+    cpdef float log_transition_A_A
+    cpdef float log_transition_I_A
+    cpdef float log_transition_D_A
+    
+    cpdef float log_transition_A_I
+    cpdef float log_transition_A_D
+    cpdef float log_transition_I_I
+    cpdef float log_transition_D_D
+    
+    cpdef float log_transition_A_E
+    cpdef float log_transition_I_E
+    cpdef float log_transition_D_E
+    
+    
+    cpdef float current_log_likelihood
+
+    cpdef float current_expected_A_A
+    cpdef float current_expected_A_I
+    cpdef float current_expected_A_D
+    
+    cpdef float current_expected_I_A
+    cpdef float current_expected_I_I
+
+    cpdef float current_expected_D_A
+    cpdef float current_expected_D_D
+    
+    cpdef float current_expected_matches
+    cpdef float current_expected_mismatches
+    
+    
+    
+    def __init__(self, float p_match, float p_gap_start, float p_gap_extend, float p_end, int alphabet_size):
         self.alphabet_size = alphabet_size
+        
+        self.constant_log_q = np.log( 1.0/alphabet_size )        
         self.log_p_match = np.log( p_match )
         self.log_p_mismatch = np.log( (1.0 - p_match)/(alphabet_size - 1) )
         
@@ -16,12 +84,13 @@ class Model():
         
         self.log_transition_A_E = self.log_transition_I_E = self.log_transition_D_E = np.log( p_end )
 
-    def log_q( self, item ):
+    cpdef (float) log_q( self, str item ):
         return self.constant_log_q
         
-    def log_p( self, itemX, itemY ):
+    cpdef (float) log_p( self, str itemX, str itemY ):
         return self.log_p_match if itemX == itemY else self.log_p_mismatch
-
+    cpdef (float) log_likelihood(self):
+        return self.current_log_likelihood
 
         
     def estimate_parameters( self, data, pseudocount_match, pseudocount_mismatch, pseudocount_align, pseudocount_gap_start, pseudocount_gap_end, pseudocount_gap_extend ):
@@ -46,8 +115,9 @@ class Model():
         
         return estimated_p_match, estimated_p_gap_start, estimated_p_gap_extend
 
-    def expected_values( self, data ):    
-        self.current_data = data
+    def expected_values( self, data ):   
+        cdef int i, j
+     
         self.current_log_likelihood = 0.0
     
         self.current_expected_A_A = 0.0
@@ -67,9 +137,9 @@ class Model():
             pair = SequencePair( self, sequenceX, sequenceY )
             log_probability_sequence = pair.forward_algorithm()
             pair.backward_algorithm()
-            
-            if index % 10 == 0:
-                print("Seq %d" % index)
+                        
+            #if index % 10 == 0:
+            #    print("Seq %d" % index)
             
             self.current_log_likelihood += log_probability_sequence
             
@@ -94,8 +164,26 @@ class Model():
                         self.current_expected_mismatches += posterior_state_A
                     
 
-class SequencePair():
-    def __init__(self, model, sequenceX, sequenceY):
+cdef class SequencePair():
+    cpdef Model model
+    cpdef str sequenceX
+    cpdef str sequenceY
+
+    cpdef int n
+    cpdef int m
+    
+    cpdef np.ndarray log_f_A
+    cpdef np.ndarray log_f_I
+    cpdef np.ndarray log_f_D
+
+    cpdef float log_f_E
+    
+    cpdef np.ndarray log_b_A
+    cpdef np.ndarray log_b_I
+    cpdef np.ndarray log_b_D
+
+
+    def __init__(self, Model model, str sequenceX, str sequenceY):
         self.model = model
         self.sequenceX = sequenceX
         self.sequenceY = sequenceY
@@ -107,34 +195,55 @@ class SequencePair():
         self.log_f_I = None
         self.log_f_D = None
 
-        self.log_f_E = None
+        self.log_f_E = np.NINF
         
         self.log_b_A = None
         self.log_b_I = None
         self.log_b_D = None
         
         
-    def log_q_x( self, i ):
+    cpdef (float) log_q_x( self, int i ):
         if i > self.n:
             return np.NINF
         return self.model.log_q( self.sequence_item_X(i) )
-    def log_q_y( self, j ):
+    cpdef (float) log_q_y( self, int j ):
         if j > self.m:
             return np.NINF
     
         return self.model.log_q( self.sequence_item_Y(j) )
         
-    def sequence_item_X(self, i):
+    cpdef (str) sequence_item_X(self, int i):
         return self.sequenceX[ i-1 ]
-    def sequence_item_Y(self, j):
+    cpdef (str) sequence_item_Y(self, int j):
         return self.sequenceY[ j-1 ]
     
-    def log_p( self, i, j ):
+    cpdef (float) log_p( self, int i, int j ):
         if i > self.n or j > self.m:
             return np.NINF
     
         return self.model.log_p( self.sequence_item_X(i), self.sequence_item_Y(j) )
 
+    def print_log_f(self):
+        print("log f_A")
+        print(self.log_f_A)
+
+        print("log f_I")
+        print(self.log_f_I)
+
+        print("log f_D")
+        print(self.log_f_D)
+        
+    def print_log_b(self):        
+        print("log b_A")
+        print(self.log_b_A)
+
+        print("log b_I")
+        print(self.log_b_I)
+
+        print("log b_D")
+        print(self.log_b_D)
+        
+    
     def forward_algorithm( self ):
         '''
         Calculates the combined probability of all alignments up to position (i,j) that end in a particular state.
@@ -144,12 +253,14 @@ class SequencePair():
         '''
         
         # Check if this function has already been called for this sequence pair
-        if self.log_f_E:
+        if self.log_f_A and self.log_f_I and self.log_f_D:
             return self.log_f_E
-            
-        log_f_A = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )
-        log_f_I = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )        
-        log_f_D = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )
+                      
+        cdef int i, j
+                    
+        cpdef np.ndarray log_f_A = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )
+        cpdef np.ndarray log_f_I = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )        
+        cpdef np.ndarray log_f_D = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )
         
         ####################################
         # Initial values at start boundaries
@@ -176,32 +287,32 @@ class SequencePair():
         for i in range( 1, self.n+1 ):
             for j in range( 1, self.m+1 ):
                 ### Probability ends in Alignment
-                log_f_A[i,j] = self.log_p( i, j ) + logsumexp( [
+                log_f_A[i,j] = self.log_p( i, j ) + logsumexp_3(
                     self.model.log_transition_A_A + log_f_A[i-1,j-1],
                     self.model.log_transition_I_A + log_f_I[i-1,j-1],
                     self.model.log_transition_D_A + log_f_D[i-1,j-1],
-                    ] )
+                    )
                     
                 ### Probability ends in Insertion
-                log_f_I[i,j] = self.log_q_x( i ) + logsumexp( [
+                log_f_I[i,j] = self.log_q_x( i ) + logsumexp_2(
                     self.model.log_transition_A_I + log_f_A[i-1,j],
                     self.model.log_transition_I_I + log_f_I[i-1,j],
-                    ] )                
+                    )                
 
                 ### Probability ends in Deletion
-                log_f_D[i,j] = self.log_q_y( j ) + logsumexp( [
+                log_f_D[i,j] = self.log_q_y( j ) + logsumexp_2(
                     self.model.log_transition_A_D + log_f_A[i,j-1],
                     self.model.log_transition_D_D + log_f_D[i,j-1],
-                    ] )
+                    )
         
         ####################################
         # Termination
         ####################################
-        self.log_f_E = logsumexp( [
+        self.log_f_E = logsumexp_3(
                     self.model.log_transition_A_E + log_f_A[self.n, self.m],
                     self.model.log_transition_I_E + log_f_I[self.n, self.m],
                     self.model.log_transition_D_E + log_f_D[self.n, self.m],
-                    ] )
+                    )
         
         self.log_f_A = log_f_A
         self.log_f_I = log_f_I
@@ -216,13 +327,13 @@ class SequencePair():
         R. Durbin, S. Eddy, A. Krogh, G. Mitchison, Biological Sequence Analysis, 93.        
         '''
         # Check if this function has already been called for this sequence pair        
-        if self.log_b_A and self.log_b_D and self.log_b_D:
+        if self.log_b_A and self.log_b_I and self.log_b_D:
             return
+        cdef int i, j        
         
-        
-        log_b_A = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 ) # We don't calculate the 0 rows so this could be optimized but it is written like this for the sake of clarity
-        log_b_I = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )        
-        log_b_D = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )
+        cpdef np.ndarray log_b_A = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 ) # We don't calculate the 0 rows so this could be optimized but it is written like this for the sake of clarity
+        cpdef np.ndarray log_b_I = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )        
+        cpdef np.ndarray log_b_D = np.full( (self.n+1, self.m+1), fill_value=np.NINF, dtype=np.float32 )
                 
         ####################################
         # Initial values at start boundaries
@@ -247,23 +358,23 @@ class SequencePair():
         for i in range( self.n-1, 0, -1 ):
             for j in range( self.m-1, 0, -1 ):
                 ### Probability of latter alignment if in state A at (i,j)
-                log_b_A[i,j] = logsumexp( [
+                log_b_A[i,j] = logsumexp_3(
                     self.model.log_transition_A_A + self.log_p(i+1,j+1) + log_b_A[i+1,j+1],
                     self.model.log_transition_A_I + self.log_q_x(i+1)   + log_b_I[i+1,j],
                     self.model.log_transition_A_D + self.log_q_y(j+1)   + log_b_D[i,j+1],
-                    ] )
+                    )
 
                 ### Probability of latter alignment if in state I (Insertion) at (i,j)
-                log_b_I[i,j] = logsumexp( [
+                log_b_I[i,j] = logsumexp_2(
                     self.model.log_transition_I_A + self.log_p(i+1,j+1) + log_b_A[i+1,j+1],
                     self.model.log_transition_I_I + self.log_q_x(i+1)   + log_b_I[i+1,j],
-                    ] )
+                    )
 
                 ### Probability of latter alignment if in state D at (i,j)
-                log_b_D[i,j] = logsumexp( [
+                log_b_D[i,j] = logsumexp_2(
                     self.model.log_transition_D_A + self.log_p(i+1,j+1) + log_b_A[i+1,j+1],
                     self.model.log_transition_D_D + self.log_q_y(j+1)   + log_b_D[i,j+1],
-                    ] )
+                    )
         
         self.log_b_A = log_b_A        
         self.log_b_I = log_b_I
@@ -271,6 +382,7 @@ class SequencePair():
         
         
 class BaumWelch():
+
     def __init__(self, initial_p_match, initial_p_gap_start, initial_p_gap_extend, p_end, alphabet_size, pseudocount_match = 0.0, pseudocount_mismatch = 0.0, pseudocount_align = 0.0, pseudocount_gap_start = 0.0, pseudocount_gap_end = 0.0, pseudocount_gap_extend = 0.0):
         self.current_p_match = initial_p_match
         self.current_p_gap_start = initial_p_gap_start
@@ -297,7 +409,7 @@ class BaumWelch():
             model = self.build_model()
             
             self.current_p_match, self.current_p_gap_start, self.current_p_gap_extend = model.estimate_parameters( data, self.pseudocount_match, self.pseudocount_mismatch, self.pseudocount_align, self.pseudocount_gap_start, self.pseudocount_gap_end, self.pseudocount_gap_extend )
-            log_likelihood = model.current_log_likelihood
+            log_likelihood = model.log_likelihood()
             print("Baum-Welch Interation:", step, log_likelihood, self.current_p_match, self.current_p_gap_start, self.current_p_gap_extend )
             
             if delta and abs( log_likelihood - prev_log_liklihood ) < delta:
