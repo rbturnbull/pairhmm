@@ -2,14 +2,14 @@ import numpy as np
 from scipy.special import logsumexp
 
 class Model():
-    def __init__(self, p_mismatch, p_gap_start, p_gap_extend, p_end, alphabet_size):
+    def __init__(self, p_match, p_gap_start, p_gap_extend, p_end, alphabet_size):
         self.constant_log_q = np.log( 1.0/alphabet_size )
         self.alphabet_size = alphabet_size
-        self.log_p_mismatch = np.log( p_mismatch )
-        self.log_p_match = np.log( 1.0 - p_mismatch * (alphabet_size - 1) )
+        self.log_p_match = np.log( p_match )
+        self.log_p_mismatch = np.log( (1.0 - p_match)/(alphabet_size - 1) )
         
-        self.log_transition_A_A = np.log( 1.0 - 2.0*p_gap_start - gap_end )
-        self.log_transition_I_A = self.log_transition_D_A = np.log( 1.0 - p_gap_extend - gap_end )
+        self.log_transition_A_A = np.log( 1.0 - 2.0*p_gap_start - p_end )
+        self.log_transition_I_A = self.log_transition_D_A = np.log( 1.0 - p_gap_extend - p_end )
         
         self.log_transition_A_I = self.log_transition_A_D = np.log( p_gap_start )
         self.log_transition_I_I = self.log_transition_D_D = np.log( p_gap_extend )
@@ -27,12 +27,12 @@ class Model():
     def estimate_parameters( self, data ):
         self.expected_values(data)
         
-        estimated_p_mismatch = expected_mismatches/(expected_matches + expected_mismatches)
+        estimated_p_match = expected_matches/(expected_matches + expected_mismatches)
         estimated_p_gap_start = 0.5*(self.current_expected_A_I+self.current_expected_A_D)/(self.current_expected_A_A+current_expected_A_I+self.current_expected_A_D)
         estimated_p_gap_extend = 0.5*(self.current_expected_I_I + self.current_expected_D_D)/(
             self.current_expected_I_I + self.current_expected_D_D + self.current_expected_I_A + self.current_expected_D_A)
         
-        return estimated_p_mismatch, estimated_p_gap_start, estimated_p_gap_extend
+        return estimated_p_match, estimated_p_gap_start, estimated_p_gap_extend
 
     def expected_values( self, data ):    
         self.current_data = data
@@ -85,8 +85,8 @@ class SequencePair():
         self.sequenceX = sequenceX
         self.sequenceY = sequenceY
 
-        self.n = len(sequence1)
-        self.m = len(sequence2)
+        self.n = len(sequenceX)
+        self.m = len(sequenceY)
         
         self.log_f_A = None
         self.log_f_I = None
@@ -145,9 +145,10 @@ class SequencePair():
         # Start boundaries for insertion and deletion states
         log_f_I[0,0] = log_f_D[0,0] = np.NINF
         for i in range( self.n ):
-            log_f_I[i+1,0] = self.log_q_x( i+1 ) + self.model.log_epsilon + log_f_I[i,0]
+            log_f_I[i+1,0] = self.log_q_x( i+1 ) + self.model.log_transition_I_I + log_f_I[i,0]
+            log_f_I[i+1,0] = i
         for j in range( self.m ):
-            log_f_D[0,j+1] = self.log_q_y( j+1 ) + self.model.log_epsilon + log_f_D[0,j]
+            log_f_D[0,j+1] = self.log_q_y( j+1 ) + self.model.log_transition_D_D + log_f_D[0,j]
             
         
         ####################################
@@ -247,22 +248,22 @@ class SequencePair():
         
         
 class BaumWelch():
-    def __init__(self, initial_p_mismatch, initial_p_gap_start, initial_p_gap_extend, p_end, alphabet_size):
-        self.current_p_mismatch = initial_p_mismatch
+    def __init__(self, initial_p_match, initial_p_gap_start, initial_p_gap_extend, p_end, alphabet_size):
+        self.current_p_match = initial_p_match
         self.current_p_gap_start = initial_p_gap_start
         self.current_p_gap_extend = initial_p_gap_extend
         self.p_end = p_end
         self.alphabet_size = alphabet_size
         
     def build_model(self):
-        return Model( self.current_p_mismatch, self.current_p_gap_start, self.current_p_gap_extend, self.p_end, self.alphabet_size )
+        return Model( self.current_p_match, self.current_p_gap_start, self.current_p_gap_extend, self.p_end, self.alphabet_size )
         
     def iterate( self, data, steps = 10, delta = None ):
         prev_log_liklihood = np.NINF
         for step in steps:
             model = self.build_model()
             
-            log_likelihood, self.current_p_mismatch, self.current_p_gap_start, self.current_p_gap_extend = model.estimate_parameters( data )
+            log_likelihood, self.current_p_match, self.current_p_gap_start, self.current_p_gap_extend = model.estimate_parameters( data )
             
             if delta and abs( log_likelihood - prev_log_liklihood ) < delta:
                 return model
