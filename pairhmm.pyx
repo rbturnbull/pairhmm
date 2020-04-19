@@ -117,6 +117,21 @@ cdef class Model():
 
     def expected_values( self, data ):   
         cdef int i, j
+        cdef float A_end_by_p_data
+        cdef float I_end_by_p_data
+        cdef float D_end_by_p_data
+        
+        cdef log_transition_A_A = self.log_transition_A_A
+        cdef log_transition_I_A = self.log_transition_I_A
+        cdef log_transition_D_A = self.log_transition_D_A
+
+        cdef log_transition_A_I = self.log_transition_A_I
+        cdef log_transition_I_I = self.log_transition_I_I
+
+        cdef log_transition_A_D = self.log_transition_A_D
+        cdef log_transition_D_D = self.log_transition_D_D
+
+        
      
         self.current_log_likelihood = 0.0
     
@@ -138,23 +153,27 @@ cdef class Model():
             log_probability_sequence = pair.forward_algorithm()
             pair.backward_algorithm()
                         
-            if index % 10 == 0:
-                print("Seq %d" % index)
+            if index % 100 == 0:
+                print("Estimating Parameters: %d of %d" % (index,len(data)) )
             
             self.current_log_likelihood += log_probability_sequence
             
             for i in range( 1, pair.n ):
                 for j in range( 1, pair.m ):
+                    A_end_by_p_data = pair.log_p[i+1,j+1] + pair.log_b_A[i+1,j+1] - log_probability_sequence
+                    I_end_by_p_data = pair.log_q_x[ i+1 ] + pair.log_b_I[i+1,j  ] - log_probability_sequence
+                    D_end_by_p_data = pair.log_q_y[ j+1 ] + pair.log_b_D[i  ,j+1] - log_probability_sequence
+                
                     # Transition Expectations
-                    self.current_expected_A_A += np.exp( pair.log_f_A[i,j] + self.log_transition_A_A + pair.log_p(i+1,j+1) + pair.log_b_A[i+1,j+1] - log_probability_sequence )
-                    self.current_expected_A_I += np.exp( pair.log_f_A[i,j] + self.log_transition_A_I + pair.log_q_x( i+1 ) + pair.log_b_I[i+1,j]   - log_probability_sequence )
-                    self.current_expected_A_D += np.exp( pair.log_f_A[i,j] + self.log_transition_A_D + pair.log_q_y( j+1 ) + pair.log_b_D[i,j+1]   - log_probability_sequence )
+                    self.current_expected_A_A += np.exp( pair.log_f_A[i,j] + log_transition_A_A + A_end_by_p_data )
+                    self.current_expected_A_I += np.exp( pair.log_f_A[i,j] + log_transition_A_I + I_end_by_p_data )
+                    self.current_expected_A_D += np.exp( pair.log_f_A[i,j] + log_transition_A_D + D_end_by_p_data )
         
-                    self.current_expected_I_A += np.exp( pair.log_f_I[i,j] + self.log_transition_I_A + pair.log_p(i+1,j+1) + pair.log_b_A[i+1,j+1] - log_probability_sequence )     
-                    self.current_expected_I_I += np.exp( pair.log_f_I[i,j] + self.log_transition_I_I + pair.log_q_x( i+1 ) + pair.log_b_I[i+1,j]   - log_probability_sequence )     
+                    self.current_expected_I_A += np.exp( pair.log_f_I[i,j] + log_transition_I_A + A_end_by_p_data )     
+                    self.current_expected_I_I += np.exp( pair.log_f_I[i,j] + log_transition_I_I + I_end_by_p_data )     
 
-                    self.current_expected_D_A += np.exp( pair.log_f_D[i,j] + self.log_transition_D_A + pair.log_p(i+1,j+1) + pair.log_b_A[i+1,j+1] - log_probability_sequence )        
-                    self.current_expected_D_D += np.exp( pair.log_f_D[i,j] + self.log_transition_D_D + pair.log_q_y( j+1 ) + pair.log_b_D[i+1,j]   - log_probability_sequence )
+                    self.current_expected_D_A += np.exp( pair.log_f_D[i,j] + log_transition_D_A + A_end_by_p_data )        
+                    self.current_expected_D_D += np.exp( pair.log_f_D[i,j] + log_transition_D_D + D_end_by_p_data )
 
                     # Emission Expectations
                     posterior_state_A = np.exp( pair.log_f_A[i,j] + pair.log_b_A[i,j] - log_probability_sequence )
@@ -182,6 +201,10 @@ cdef class SequencePair():
     cpdef np.ndarray log_b_I
     cpdef np.ndarray log_b_D
 
+    cpdef np.ndarray log_p
+    cpdef np.ndarray log_q_x
+    cpdef np.ndarray log_q_y
+
 
     def __init__(self, Model model, str sequenceX, str sequenceY):
         self.model = model
@@ -201,13 +224,17 @@ cdef class SequencePair():
         self.log_b_I = None
         self.log_b_D = None
         
+        self.log_p = np.fromfunction( np.vectorize(self.calc_log_p), (self.n+1,self.m+1), dtype=np.float32 )
+        self.log_q_x = np.fromfunction( np.vectorize(self.calc_log_q_x), (self.n+1,), dtype=np.float32 )
+        self.log_q_y = np.fromfunction( np.vectorize(self.calc_log_q_y), (self.m+1,), dtype=np.float32 )
         
-    cpdef (float) log_q_x( self, int i ):
-        if i > self.n:
+        
+    cpdef (float) calc_log_q_x( self, int i ):
+        if i > self.n or i <= 0:
             return np.NINF
         return self.model.log_q( self.sequence_item_X(i) )
-    cpdef (float) log_q_y( self, int j ):
-        if j > self.m:
+    cpdef (float) calc_log_q_y( self, int j ):
+        if j > self.m or j <= 0:
             return np.NINF
     
         return self.model.log_q( self.sequence_item_Y(j) )
@@ -217,8 +244,8 @@ cdef class SequencePair():
     cpdef (str) sequence_item_Y(self, int j):
         return self.sequenceY[ j-1 ]
     
-    cpdef (float) log_p( self, int i, int j ):
-        if i > self.n or j > self.m:
+    cpdef (float) calc_log_p( self, int i, int j ):
+        if i > self.n or j > self.m or i <= 0 or j <= 0:
             return np.NINF
     
         return self.model.log_p( self.sequence_item_X(i), self.sequence_item_Y(j) )
@@ -262,6 +289,17 @@ cdef class SequencePair():
         cpdef np.ndarray log_f_I = np.empty( (self.n+1, self.m+1), dtype=np.float32 )        
         cpdef np.ndarray log_f_D = np.empty( (self.n+1, self.m+1), dtype=np.float32 )
         
+        cdef log_transition_A_A = self.model.log_transition_A_A
+        cdef log_transition_I_A = self.model.log_transition_I_A
+        cdef log_transition_D_A = self.model.log_transition_D_A
+
+        cdef log_transition_A_I = self.model.log_transition_A_I
+        cdef log_transition_I_I = self.model.log_transition_I_I
+
+        cdef log_transition_A_D = self.model.log_transition_A_D
+        cdef log_transition_D_D = self.model.log_transition_D_D
+
+        
         ####################################
         # Initial values at start boundaries
         ####################################
@@ -273,23 +311,23 @@ cdef class SequencePair():
         # Initialize j == 0 boundary     
         if self.n > 0:  
             log_f_A[1,0] = np.NINF         
-            log_f_I[1,0] = self.model.log_transition_A_I + self.log_q_x( 1 )
+            log_f_I[1,0] = log_transition_A_I + self.log_q_x[ 1 ]
             log_f_D[1,0] = np.NINF
             
             for i in range( 2, self.n+1 ):
                 log_f_A[i,0] = np.NINF            
-                log_f_I[i,0] = self.log_q_x( i ) + self.model.log_transition_I_I + log_f_I[i-1,0]
+                log_f_I[i,0] = self.log_q_x[ i ] + log_transition_I_I + log_f_I[i-1,0]
                 log_f_D[i,0] = np.NINF
 
         # Initialize i == 0 boundary  
         if self.m > 0:              
             log_f_A[0,1] = np.NINF               
             log_f_I[0,1] = np.NINF               
-            log_f_D[0,1] = self.model.log_transition_A_D + self.log_q_y( 1 )
+            log_f_D[0,1] = log_transition_A_D + self.log_q_y[ 1 ]
             for j in range( 2, self.m+1 ):
                 log_f_A[0,j] = np.NINF
                 log_f_I[0,j] = np.NINF
-                log_f_D[0,j] = self.log_q_y( j ) + self.model.log_transition_D_D + log_f_D[0,j-1]
+                log_f_D[0,j] = self.log_q_y[ j ] + log_transition_D_D + log_f_D[0,j-1]
                 
         ####################################
         # Recursion
@@ -297,22 +335,22 @@ cdef class SequencePair():
         for i in range( 1, self.n+1 ):
             for j in range( 1, self.m+1 ):
                 ### Probability ends in Alignment
-                log_f_A[i,j] = self.log_p( i, j ) + logsumexp_3(
-                    self.model.log_transition_A_A + log_f_A[i-1,j-1],
-                    self.model.log_transition_I_A + log_f_I[i-1,j-1],
-                    self.model.log_transition_D_A + log_f_D[i-1,j-1],
+                log_f_A[i,j] = self.log_p[ i, j ] + logsumexp_3(
+                    log_transition_A_A + log_f_A[i-1,j-1],
+                    log_transition_I_A + log_f_I[i-1,j-1],
+                    log_transition_D_A + log_f_D[i-1,j-1],
                     )
                     
                 ### Probability ends in Insertion
-                log_f_I[i,j] = self.log_q_x( i ) + logsumexp_2(
-                    self.model.log_transition_A_I + log_f_A[i-1,j],
-                    self.model.log_transition_I_I + log_f_I[i-1,j],
+                log_f_I[i,j] = self.log_q_x[ i ] + logsumexp_2(
+                    log_transition_A_I + log_f_A[i-1,j],
+                    log_transition_I_I + log_f_I[i-1,j],
                     )                
 
                 ### Probability ends in Deletion
-                log_f_D[i,j] = self.log_q_y( j ) + logsumexp_2(
-                    self.model.log_transition_A_D + log_f_A[i,j-1],
-                    self.model.log_transition_D_D + log_f_D[i,j-1],
+                log_f_D[i,j] = self.log_q_y[ j ] + logsumexp_2(
+                    log_transition_A_D + log_f_A[i,j-1],
+                    log_transition_D_D + log_f_D[i,j-1],
                     )
         
         ####################################
@@ -348,6 +386,16 @@ cdef class SequencePair():
         cdef float A_end
         cdef float I_end
         cdef float D_end
+        
+        cdef log_transition_A_A = self.model.log_transition_A_A
+        cdef log_transition_I_A = self.model.log_transition_I_A
+        cdef log_transition_D_A = self.model.log_transition_D_A
+
+        cdef log_transition_A_I = self.model.log_transition_A_I
+        cdef log_transition_I_I = self.model.log_transition_I_I
+
+        cdef log_transition_A_D = self.model.log_transition_A_D
+        cdef log_transition_D_D = self.model.log_transition_D_D        
                 
         ####################################
         # Initial values at start boundaries
@@ -358,42 +406,42 @@ cdef class SequencePair():
         
         for i in range( self.n-1, 0, -1 ):
             j = self.m
-            log_b_A[i,j] = self.model.log_transition_A_I + self.log_q_x(i+1) + log_b_I[i+1,j]            
-            log_b_I[i,j] = self.model.log_transition_I_I + self.log_q_x(i+1) + log_b_I[i+1,j]
+            log_b_A[i,j] = log_transition_A_I + self.log_q_x[i+1] + log_b_I[i+1,j]            
+            log_b_I[i,j] = log_transition_I_I + self.log_q_x[i+1] + log_b_I[i+1,j]
             log_b_D[i,j] = np.NINF
             
         for j in range( self.m-1, 0, -1 ):
             i = self.n       
-            log_b_A[i,j] = self.model.log_transition_A_D + self.log_q_y(j+1) + log_b_D[i,j+1]
+            log_b_A[i,j] = log_transition_A_D + self.log_q_y[j+1] + log_b_D[i,j+1]
             log_b_I[i,j] = np.NINF
-            log_b_D[i,j] = self.model.log_transition_D_D + self.log_q_y(j+1) + log_b_D[i,j+1]
+            log_b_D[i,j] = log_transition_D_D + self.log_q_y[j+1] + log_b_D[i,j+1]
 
         ####################################
         # Recursion
         ####################################                    
         for i in range( self.n-1, 0, -1 ):
             for j in range( self.m-1, 0, -1 ):
-                A_end = self.log_p(i+1,j+1) + log_b_A[i+1,j+1]
-                I_end = self.log_q_x(i+1)   + log_b_I[i+1,j]
-                D_end = self.log_q_y(j+1)   + log_b_D[i,j+1]
+                A_end = self.log_p[i+1,j+1] + log_b_A[i+1,j+1]
+                I_end = self.log_q_x[i+1]   + log_b_I[i+1,j]
+                D_end = self.log_q_y[j+1]   + log_b_D[i,j+1]
             
                 ### Probability of latter alignment if in state A at (i,j)
                 log_b_A[i,j] = logsumexp_3(
-                    self.model.log_transition_A_A + A_end,
-                    self.model.log_transition_A_I + I_end,
-                    self.model.log_transition_A_D + D_end,
+                    log_transition_A_A + A_end,
+                    log_transition_A_I + I_end,
+                    log_transition_A_D + D_end,
                     )
 
                 ### Probability of latter alignment if in state I (Insertion) at (i,j)
                 log_b_I[i,j] = logsumexp_2(
-                    self.model.log_transition_I_A + A_end,
-                    self.model.log_transition_I_I + I_end,
+                    log_transition_I_A + A_end,
+                    log_transition_I_I + I_end,
                     )
 
                 ### Probability of latter alignment if in state D at (i,j)
                 log_b_D[i,j] = logsumexp_2(
-                    self.model.log_transition_D_A + A_end,
-                    self.model.log_transition_D_D + D_end,
+                    log_transition_D_A + A_end,
+                    log_transition_D_D + D_end,
                     )
         
         self.log_b_A = log_b_A        
